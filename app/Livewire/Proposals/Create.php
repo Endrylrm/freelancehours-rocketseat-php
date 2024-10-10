@@ -5,6 +5,8 @@ namespace App\Livewire\Proposals;
 use App\Actions\ArrangePositions;
 use App\Models\Project;
 use App\Models\Proposal;
+use App\Notifications\NewProposal;
+use App\Notifications\PositionLoss;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Rule;
 use Livewire\Component;
@@ -31,12 +33,16 @@ class Create extends Component
             return;
         }
 
-        $proposal = $this->project->proposals()->updateOrCreate(
-            ['email' => $this->email],
-            ['hours' => $this->hours]
-        );
+        DB::transaction(function () {
+            $proposal = $this->project->proposals()->updateOrCreate(
+                ['email' => $this->email],
+                ['hours' => $this->hours]
+            );
 
-        $this->arangePositions($proposal);
+            $this->arangePositions($proposal);
+        });
+
+        $this->project->author->notify(new NewProposal($this->project));
 
         $this->dispatch('proposal::created');
         $this->modal = false;
@@ -55,7 +61,9 @@ class Create extends Component
 
         if ($otherProposal) {
             $proposal->update(['position_status' => 'up']);
-            Proposal::query()->where('id', '=', $otherProposal->id)->update(['position_status' => 'down']);
+            $oProposal = Proposal::find($otherProposal->id);
+            $oProposal->update(['position_status' => 'down']);
+            $oProposal->notify(new PositionLoss($this->project));
         }
 
         ArrangePositions::run($proposal->project_id);
